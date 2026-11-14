@@ -508,10 +508,40 @@ ensure_admin(
     aliases=("ZYLECO", "ZYELEO"),
 )
 
+
+# ======================================================================
+#     bot starts ONCE — file lock prevents multi-worker duplication
+# ======================================================================
+def _try_start_bot_once():
+    """Start bot in exactly one worker. Others skip via file lock."""
+    if not Config.TELEGRAM_BOT_TOKEN:
+        log.warning("TELEGRAM_BOT_TOKEN missing — bot disabled")
+        return
+
+    try:
+        import fcntl
+    except ImportError:
+        # non-linux dev — single-process assumption
+        _start_bot_thread()
+        return
+
+    lock_path = os.path.join(BANNER_DIR, ".bot.lock")
+    try:
+        f = open(lock_path, "w")
+        fcntl.flock(f, fcntl.LOCK_EX | fcntl.LOCK_NB)
+        globals()["_BOT_LOCK_FD"] = f
+        _start_bot_thread()
+    except (IOError, OSError):
+        log.info("bot lock held by another worker — skipping this one")
+
+
 if os.environ.get("RUN_BOT", "1") == "1":
-    _start_bot_thread()
+    _try_start_bot_once()
 
 
+# ======================================================================
+#                       ROUTES
+# ======================================================================
 @app.route("/static.css")
 def static_css():
     return send_from_directory(".", "static.css", mimetype="text/css")
